@@ -6,8 +6,9 @@ Copyright (C) 2019 NuMat Technologies
 """
 import logging
 from typing import Any
+import asyncio
 
-from sartorius.util import Client, SerialClient, TcpClient
+from .util import Client, SerialClient, TcpClient
 
 logger = logging.getLogger('sartorius')
 
@@ -40,6 +41,8 @@ class Scale:
                 address = f'{address}:{port}'
             self.hw = TcpClient(address=address, **kwargs)
 
+        self.loop = asyncio.get_event_loop()
+
     async def __aenter__(self, *args: Any) -> 'Scale':
         """Provide async enter to context manager."""
         return self
@@ -51,8 +54,10 @@ class Scale:
     async def get(self) -> dict:
         """Get scale reading."""
         response = await self.hw._write_and_read('\x1bP')
-        if not response:
-            raise OSError("Unable to get reading from scale.")
+        while not response:
+            #raise OSError("Unable to get reading from scale.")
+            response = await self.hw._write_and_read('\x1bP')
+            await asyncio.sleep(0.5)
         return self._parse(response)
 
     async def get_info(self) -> dict:
@@ -72,6 +77,8 @@ class Scale:
                 logger.error(f"Received malformed data: {response}")
                 return {}
         return response
+
+    
 
     async def zero(self) -> None:
         """Tare and zero the scale."""
@@ -128,3 +135,11 @@ class Scale:
             'stable': stable,
             'measurement': measurement,
         }
+    def read_scale(self):
+        """Get scale reading."""
+        import time
+        reading = self.loop.run_until_complete(self.get())
+        while not reading['stable']:      # Get mass, units, stability
+            time.sleep(0.1)
+            reading = self.loop.run_until_complete(self.get())
+        return float(reading['mass'])
